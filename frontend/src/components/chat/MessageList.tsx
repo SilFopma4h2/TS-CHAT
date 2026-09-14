@@ -4,6 +4,9 @@ import React, { useEffect, useRef } from 'react';
 import { ChatMessage, UserProfile, UserType } from '@/types/chat';
 import { MessageItem } from './MessageItem';
 import { TypingIndicator } from './TypingIndicator';
+import { LoadingSkeleton } from '@/components/ui/LoadingSkeleton';
+import { ErrorState } from '@/components/ui/ErrorState';
+import { EmptyChatState } from '@/components/ui/EmptyChatState';
 import { USERS } from '@/lib/constants';
 import { formatMessageDate } from '@/lib/utils';
 
@@ -12,6 +15,9 @@ interface MessageListProps {
   currentUser: UserType;
   partner: UserProfile;
   isPartnerTyping: boolean;
+  isLoading?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
 }
 
 export const MessageList: React.FC<MessageListProps> = ({
@@ -19,57 +25,61 @@ export const MessageList: React.FC<MessageListProps> = ({
   currentUser,
   partner,
   isPartnerTyping,
+  isLoading = false,
+  error = null,
+  onRetry,
 }) => {
   const bottomRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages, isPartnerTyping]);
+    if (!isLoading && !error) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, [messages, isPartnerTyping, isLoading, error]);
 
   return (
     <div
       ref={containerRef}
-      className="flex-1 overflow-y-auto py-4 space-y-1 scroll-smooth bg-zinc-950/60"
+      className="flex-1 overflow-y-auto py-4 space-y-1 scroll-smooth bg-zinc-950/60 flex flex-col"
     >
-      {/* Date badge */}
-      <div className="flex justify-center my-2">
-        <span className="bg-zinc-900/90 text-zinc-400 text-[11px] font-medium px-3 py-1 rounded-full border border-zinc-800 shadow-xs">
-          {messages.length > 0
-            ? formatMessageDate(messages[0].createdAt)
-            : 'Vandaag'}
-        </span>
-      </div>
-
-      {messages.length === 0 ? (
-        <div className="flex flex-col items-center justify-center h-48 text-center px-4">
-          <div className="w-12 h-12 rounded-full bg-zinc-900 border border-zinc-800 flex items-center justify-center text-zinc-500 mb-2">
-            💬
-          </div>
-          <p className="text-sm font-medium text-zinc-400">Nog geen berichten</p>
-          <p className="text-xs text-zinc-500 mt-1 max-w-xs">
-            Start een privégesprek tussen Sil en Twan door hieronder een bericht te typen.
-          </p>
-        </div>
+      {/* 1. Loading State */}
+      {isLoading ? (
+        <LoadingSkeleton />
+      ) : error ? (
+        /* 2. Error State */
+        <ErrorState message={error} onRetry={onRetry} />
+      ) : messages.length === 0 ? (
+        /* 3. Empty Chat State */
+        <EmptyChatState partner={partner} />
       ) : (
-        messages.map((message) => {
-          const isSelf = message.sender === currentUser;
-          const senderProfile = USERS[message.sender];
+        /* 4. Normal Message List */
+        <>
+          <div className="flex justify-center my-2">
+            <span className="bg-zinc-900/90 text-zinc-400 text-[11px] font-medium px-3 py-1 rounded-full border border-zinc-800 shadow-xs">
+              {formatMessageDate(messages[0].createdAt)}
+            </span>
+          </div>
 
-          return (
-            <MessageItem
-              key={message.id}
-              message={message}
-              isSelf={isSelf}
-              senderProfile={senderProfile}
-            />
-          );
-        })
+          {messages.map((message) => {
+            const isSelf = message.sender === currentUser;
+            const senderProfile = USERS[message.sender];
+
+            return (
+              <MessageItem
+                key={message.id}
+                message={message}
+                isSelf={isSelf}
+                senderProfile={senderProfile}
+              />
+            );
+          })}
+
+          {isPartnerTyping && <TypingIndicator partner={partner} />}
+
+          <div ref={bottomRef} className="h-1" />
+        </>
       )}
-
-      {isPartnerTyping && <TypingIndicator partner={partner} />}
-
-      <div ref={bottomRef} className="h-1" />
     </div>
   );
 };

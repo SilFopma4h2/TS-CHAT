@@ -21,12 +21,13 @@ const MOCK_REPLIES: Record<UserType, string[]> = {
   ],
 };
 
-export function getMockReply(sender: UserType): ChatMessage {
+export function getMockReply(sender: UserType, conversationId: string = 'conv-sil-twan'): ChatMessage {
   const replies = MOCK_REPLIES[sender];
   const text = replies[Math.floor(Math.random() * replies.length)];
 
   return {
     id: generateId('mock'),
+    conversationId,
     sender,
     text,
     createdAt: new Date().toISOString(),
