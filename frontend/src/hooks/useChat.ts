@@ -7,7 +7,7 @@ import { generateId } from '@/lib/utils';
 import { getMockReply } from '@/services/mockChatService';
 
 export function useChat() {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(true);
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<UserType>('sil');
   const [conversations, setConversations] = useState<Conversation[]>(INITIAL_CONVERSATIONS);
   const [activeConversationId, setActiveConversationId] = useState<string>('conv-sil-twan');
@@ -28,6 +28,11 @@ export function useChat() {
   const user = USERS[currentUser];
 
   const timeoutsRef = useRef<NodeJS.Timeout[]>([]);
+  const activeConversationIdRef = useRef(activeConversationId);
+
+  useEffect(() => {
+    activeConversationIdRef.current = activeConversationId;
+  }, [activeConversationId]);
 
   const clearPendingTimeouts = useCallback(() => {
     timeoutsRef.current.forEach(clearTimeout);
@@ -104,11 +109,12 @@ export function useChat() {
 
       // Simuleer status update naar 'delivered' na 500ms
       const statusTimeout = setTimeout(() => {
+        const convId = activeConversationIdRef.current;
         setMessagesByConversation((prev) => {
-          const list = prev[activeConversationId] || [];
+          const list = prev[convId] || [];
           return {
             ...prev,
-            [activeConversationId]: list.map((msg) =>
+            [convId]: list.map((msg) =>
               msg.id === newMessage.id ? { ...msg, status: 'delivered' } : msg
             ),
           };
@@ -123,16 +129,17 @@ export function useChat() {
 
           const replyTimeout = setTimeout(() => {
             setIsPartnerTyping(false);
+            const convId = activeConversationIdRef.current;
             const reply: ChatMessage = {
               ...getMockReply(partnerId),
-              conversationId: activeConversationId,
+              conversationId: convId,
             };
 
             setMessagesByConversation((prev) => {
-              const list = prev[activeConversationId] || [];
+              const list = prev[convId] || [];
               return {
                 ...prev,
-                [activeConversationId]: [
+                [convId]: [
                   ...list.map((m) =>
                     m.id === newMessage.id ? { ...m, status: 'read' as const } : m
                   ),
@@ -141,7 +148,7 @@ export function useChat() {
               };
             });
 
-            updateConversationMeta(activeConversationId, reply);
+            updateConversationMeta(convId, reply);
           }, 1800);
 
           timeoutsRef.current.push(replyTimeout);
