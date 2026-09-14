@@ -1,11 +1,9 @@
-import { ChatMessage } from '@/types/chat';
+import { ChatMessage, UserType } from '@/types/chat';
+import { healthApi, messagesApi } from '@/lib/api';
 
 /**
- * REST API client interface voor TS-CHAT
- * Wordt gekoppeld aan de backend in latere MVP fasen.
+ * Service adapter die de UI verbindt met de onderliggende REST API client abstraction.
  */
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || '/api';
 
 export interface HealthResponse {
   status: 'ok' | 'error';
@@ -18,25 +16,31 @@ export const apiService = {
    */
   async getHealth(): Promise<HealthResponse> {
     try {
-      const res = await fetch(`${API_BASE_URL}/health`);
-      if (!res.ok) throw new Error(`Health check failed: ${res.status}`);
-      return await res.json();
+      const res = await healthApi.checkHealth();
+      return { status: res.status, timestamp: new Date().toISOString() };
     } catch {
       return { status: 'error', timestamp: new Date().toISOString() };
     }
   },
 
   /**
-   * Ophalen van historische berichten
+   * Ophalen van historische berichten voor een gesprek
    */
-  async getMessages(limit: number = 50, before?: string): Promise<ChatMessage[]> {
+  async getMessages(
+    chatId: string = 'conv-sil-twan',
+    limit: number = 50,
+    before?: string
+  ): Promise<ChatMessage[]> {
     try {
-      const params = new URLSearchParams({ limit: limit.toString() });
-      if (before) params.append('before', before);
-
-      const res = await fetch(`${API_BASE_URL}/messages?${params.toString()}`);
-      if (!res.ok) throw new Error(`Fetch messages failed: ${res.status}`);
-      return await res.json();
+      const messages = await messagesApi.getMessages(chatId, { limit, before });
+      return messages.map((m) => ({
+        id: m.id,
+        conversationId: m.chatId,
+        sender: (m.senderId === 'sil' ? 'sil' : 'twan') as UserType,
+        text: m.text,
+        createdAt: m.createdAt,
+        status: m.status || 'read',
+      }));
     } catch {
       return [];
     }
@@ -45,15 +49,21 @@ export const apiService = {
   /**
    * Fallback voor verzenden via REST
    */
-  async sendMessage(sender: string, text: string): Promise<ChatMessage | null> {
+  async sendMessage(
+    chatId: string = 'conv-sil-twan',
+    sender: UserType,
+    text: string
+  ): Promise<ChatMessage | null> {
     try {
-      const res = await fetch(`${API_BASE_URL}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sender, text }),
-      });
-      if (!res.ok) throw new Error(`Send message failed: ${res.status}`);
-      return await res.json();
+      const res = await messagesApi.sendMessage(chatId, { text });
+      return {
+        id: res.id,
+        conversationId: res.chatId,
+        sender,
+        text: res.text,
+        createdAt: res.createdAt,
+        status: res.status || 'sent',
+      };
     } catch {
       return null;
     }
