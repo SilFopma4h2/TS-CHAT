@@ -295,6 +295,9 @@ Realtime interacties lopen via JSON frames over `/ws`:
 
 // Bevestiging verzonden bericht
 { "type": "MESSAGE_ACK", "payload": { "tempId": "uuid-1", "id": "msg-124", "createdAt": "..." } }
+
+// Foutmelding vanuit server (bijv. ongeldig bericht, database fout, of verbinding geweigerd)
+{ "type": "ERROR", "payload": { "message": "Ongeldige payload of serverfout", "details?: "..." } }
 ```
 
 ---

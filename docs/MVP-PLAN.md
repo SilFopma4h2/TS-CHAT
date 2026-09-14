@@ -38,9 +38,9 @@ Bij inspectie van de repository op branch `feature/sil-frontend` is het volgende
 
 Gezien het doel (een lichte, snelle, privé realtime chatapplicatie voor twee gebruikers die soepel moet draaien en gehost wordt op een Raspberry Pi 3), wordt een moderne TypeScript-gebaseerde frontend met minimale overhead voorgesteld.
 
-### Aanbevolen Technologie
-- **Framework:** Vite + React (TypeScript) of Vite + Vanilla TypeScript / Svelte. *Aanbeveling: Vite + React + TypeScript* vanwege robuust ecosysteem, sterke type-veiligheid en snelle development server.
-- **Styling:** Tailwind CSS of modern CSS modules (donker thema, modern & clean chat design, desktop & mobiel geoptimaliseerd).
+### Aanbevolen Technologie (Huidig)
+- **Framework:** Next.js (App Router) met React en TypeScript. Vanwege server-side rendering opties en integratie met Vercel/Node deployments.
+- **Styling:** Tailwind CSS (v4) voor moderne, responsieve en schone chat design.
 - **Icons:** Lucide-react of lichte SVG icons.
 
 ### Directory Indeling (`frontend/`)
@@ -108,10 +108,16 @@ frontend/
 
 Het definitieve contract wordt gezamenlijk vastgelegd in `docs/API.md`. Hieronder staan de uitgangspunten voor de frontend.
 
-### A. REST Endpoints (HTTP)
-- `GET /api/health` — Status van backend en database.
-- `POST /api/auth/login` — Eenvoudige login/token validatie.
-- `GET /api/messages?limit=50&before=<timestamp>` — Historische berichten ophalen bij openen van de app.
+### A. REST Endpoints (HTTP) — Conform `docs/API.md`
+- `GET /health` — Status van backend en database (Deel 1, geïmplementeerd door Twan).
+- `POST /api/auth/login` — Inloggen (Contract Deel 2).
+- `POST /api/auth/register` — Nieuwe gebruiker registreren (Contract Deel 2).
+- `GET /api/auth/me` — Ingelogde gebruiker (Contract Deel 2).
+- `GET /api/chats` — Overzicht actieve gesprekken (Contract Deel 2).
+- `POST /api/chats` — Direct gesprek starten of ophalen met partner (Contract Deel 2).
+- `GET /api/chats/:id` — Details specifiek gesprek (Contract Deel 2).
+- `GET /api/chats/:chatId/messages?limit=50&before=<timestamp>` — Historische berichten (Contract Deel 2).
+- `POST /api/chats/:chatId/messages` — REST fallback voor verzenden (Contract Deel 2).
 
 ### B. WebSocket Protocol (`/ws` of `/socket.io`)
 Alle realtime communicatie verloopt via JSON-berichten over WebSocket:
@@ -147,6 +153,9 @@ Alle realtime communicatie verloopt via JSON-berichten over WebSocket:
 
 // Bevestiging verzonden bericht (tempId koppelen aan definitief id)
 { "type": "MESSAGE_ACK", "payload": { "tempId": "uuid-123", "id": "msg-789", "createdAt": "..." } }
+
+// Foutmelding vanuit server
+{ "type": "ERROR", "payload": { "message": "Ongeldige payload of serverfout" } }
 ```
 
 ---
@@ -169,15 +178,15 @@ Alle realtime communicatie verloopt via JSON-berichten over WebSocket:
             ┌────────────────┴────────────────┐
             ▼                                 ▼
    ┌───────────────────┐             ┌──────────────────┐
-   │ Frontend (Static) │             │ Backend (Node/Py)│
+   │ Frontend (Static) │             │ Backend (Node/TS)│
    │ Nginx Alpine      │             │ Realtime API/WS  │
    │ (< 15MB RAM)      │             │ (< 100MB RAM)    │
    └───────────────────┘             └────────┬─────────┘
                                               │
                                               ▼
                                      ┌──────────────────┐
-                                     │ SQLite / SQLite  │
-                                     │ data volume      │
+                                     │ PostgreSQL       │
+                                     │ (data volume)    │
                                      └──────────────────┘
 ```
 
@@ -195,10 +204,10 @@ Alle realtime communicatie verloopt via JSON-berichten over WebSocket:
 
 1. **MVP 1 (Huidig):**
    - Repository inspectie, afbakenen verantwoordelijkheden en opstellen van het architectuurplan (`docs/MVP-PLAN.md`).
-2. **MVP 2 (Frontend Scaffold & UI Prototype):**
-   - Initialisatie van de `frontend/` structuur met Vite + React + TypeScript.
-   - Bouwen van de visuele componenten (ChatHeader, MessageList, MessageInput, UserSelect).
-   - Mock data en lokale state testen in de browser.
+2. **MVP 2 (Frontend Scaffold & UI Prototype) — Voltooid:**
+   - `frontend/` structuur met Next.js 16.3.5 + React 19 + TypeScript op `feature/sil-frontend`.
+   - Componenten gebouwd: ChatHeader, MessageList, MessageItem, MessageInput, UserSelect, AuthScreen.
+   - Mock data (`useChat` hook, `mockChatService`) en lokale state getest in de browser.
 3. **MVP 3 (API Contract & WebSocket Service):**
    - Opstellen van `docs/API.md` in overleg met Twan.
    - Implementatie van `frontend/src/services/websocket.ts` en `useWebSocket` hook met mock/echo functionaliteit.
