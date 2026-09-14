@@ -12,6 +12,7 @@ export interface Config {
   env: 'development' | 'production' | 'test';
   port: number;
   isProduction: boolean;
+  databaseUrl: string;
 }
 
 const parsePort = (raw: string | undefined): number => {
@@ -23,6 +24,7 @@ const config: Config = {
   env: (process.env.NODE_ENV as Config['env']) ?? 'development',
   port: parsePort(process.env.PORT),
   isProduction: process.env.NODE_ENV === 'production',
+  databaseUrl: process.env.DATABASE_URL ?? '',
 };
 
 export default config;

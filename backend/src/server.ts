@@ -2,6 +2,7 @@ import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createApp } from './app.js';
 import config from './config/index.js';
+import { db } from './db/index.js';
 import { attachWebSocketServer } from './websocket/index.js';
 
 const app = createApp();
@@ -15,10 +16,21 @@ httpServer.listen(config.port, () => {
   console.log(`DuoChat backend listening on http://localhost:${port} (${config.env})`);
 });
 
-function shutdown(signal: string): void {
+async function shutdown(signal: string): Promise<void> {
   console.log(`${signal} received — shutting down`);
-  httpServer.close(() => process.exit(0));
+  httpServer.close(async () => {
+    try {
+      // Close the PostgreSQL connection pool so the process exits cleanly.
+      await db.close();
+    } finally {
+      process.exit(0);
+    }
+  });
 }
 
-process.on('SIGINT', () => shutdown('SIGINT'));
-process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => {
+  void shutdown('SIGINT');
+});
+process.on('SIGTERM', () => {
+  void shutdown('SIGTERM');
+});
