@@ -64,7 +64,7 @@ export default function Home() {
           conversations={conversations}
           selectedConversationId={activeConversationId}
           onSelectConversation={handleSelectConversation}
-          currentUser={user as any}
+          currentUser={user as {id:string}}
           onLogout={logout}
           onSwitchUser={switchUser}
           partnerIsOnline={partnerIsOnline}

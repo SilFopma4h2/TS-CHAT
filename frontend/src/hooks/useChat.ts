@@ -5,9 +5,7 @@ import { ChatMessage, Conversation, UserType } from '@/types/chat';
 import { INITIAL_CONVERSATIONS, INITIAL_MOCK_MESSAGES, USERS } from '@/lib/constants';
 import { generateId } from '@/lib/utils';
 import { authApi, chatsApi, messagesApi } from '@/lib/api';
-import { apiClient } from '@/lib/api/client';
 import { webSocketService } from '@/services/websocket';
-import { WebSocketMessage } from '@/types/events';
 import { getMockReply } from '@/services/mockChatService';
 
 export function useChat() {
@@ -78,9 +76,10 @@ export function useChat() {
       webSocketService.connect();
       try { const chats = await chatsApi.getChats(); setConversations(chats.map(c => ({ id: c.id, partnerId: (c.participants.find(p => p.id !== res.user.id)?.id as UserType) || partnerId, title: c.name || '', subtitle: '', unreadCount: c.unreadCount || 0, updatedAt: c.updatedAt })) as Conversation[]); } catch { /* backend missing */ }
       setConnectionStatus('connected');
-    } catch (e: any) {
-      setError(e?.message || 'Inloggen mislukt');
-      setConnectionStatus('disconnected');
+    } catch (e: unknown) {
+      const msg = (e && typeof e === "object" && "message" in e) ? String((e as {message: string}).message) : "Inloggen mislukt";
+      setError(msg);
+      setConnectionStatus("disconnected");
     } finally { setIsLoading(false); }
   }, [partnerId]);
 
@@ -258,5 +257,6 @@ export function useChat() {
     togglePartnerOnline,
     clearMessages,
     resetMockMessages,
+    connectionStatus,
   };
 }
