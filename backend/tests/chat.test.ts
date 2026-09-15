@@ -81,28 +81,39 @@ function makeAuthReq(token: string): Partial<Request> {
   return { headers: { authorization: `Bearer ${token}` } };
 }
 
+async function withAuth(
+  token: string,
+  handler: RequestHandler,
+  req: Partial<Request>,
+  res: Response,
+): Promise<unknown[]> {
+  const authReq: Partial<Request> = { ...req, ...makeAuthReq(token) };
+  const authErrors = await invoke(requireAuth as RequestHandler, authReq, res);
+  if (authErrors.length > 0) return authErrors;
+  return invoke(handler, authReq, res);
+}
+
 describe('POST /chats (one-to-one)', () => {
   it('creates a chat between two users', async () => {
     let chatId = 1;
-    let userIdCounter = 1;
     const users = new Map<number, { id: number; passwordHash: string }>();
 
     const fakeDb = {
       query: async (text: string, params: unknown[]) => {
-        if (text.startsWith('SELECT id FROM users WHERE id =')) {
+        if (text.includes('SELECT id FROM users WHERE id =')) {
           const id = params[0] as number;
           return qr(users.has(id) ? [{ id }] : [], users.has(id) ? 1 : 0);
         }
-        if (text.startsWith('SELECT c.id FROM chats c JOIN chat_members')) {
+        if (text.includes('SELECT c.id FROM chats c JOIN chat_members')) {
           return qr<{ id: number }>([], 0);
         }
-        if (text.startsWith('INSERT INTO chats')) {
+        if (text.includes('INSERT INTO chats')) {
           return qr([{ id: chatId++, created_at: new Date() }]);
         }
-        if (text.startsWith('INSERT INTO chat_members')) {
+        if (text.includes('INSERT INTO chat_members')) {
           return qr([], 2);
         }
-        if (text.startsWith('SELECT u.id, u.username FROM chat_members')) {
+        if (text.includes('SELECT u.id, u.username FROM chat_members')) {
           return qr([
             { chat_id: 1, id: 1, username: 'alice' },
             { chat_id: 1, id: 2, username: 'bob' },
@@ -131,7 +142,7 @@ describe('POST /chats (one-to-one)', () => {
     const token = signToken({ sub: 1, username: 'alice' });
     const { res, statusCode, body } = makeRes();
 
-    const errors = await invoke(createChat, { ...makeAuthReq(token), body: { userId: 2 } }, res);
+    const errors = await withAuth(token, createChat, { body: { userId: 2 } }, res);
 
     assert.deepEqual(errors, []);
     assert.equal(statusCode(), 201);
@@ -145,7 +156,7 @@ describe('POST /chats (one-to-one)', () => {
     const token = signToken({ sub: 5, username: 'me' });
     const { res } = makeRes();
 
-    const errors = await invoke(createChat, { ...makeAuthReq(token), body: { userId: 5 } }, res);
+    const errors = await withAuth(token, createChat, { body: { userId: 5 } }, res);
 
     assert.equal(errors.length, 1);
     const err = errors[0] as ApiError;
@@ -156,7 +167,7 @@ describe('POST /chats (one-to-one)', () => {
   it('rejects non-existent user (404)', async () => {
     const fakeDb = {
       query: async (text: string, params: unknown[]) => {
-        if (text.startsWith('SELECT id FROM users WHERE id =')) {
+        if (text.includes('SELECT id FROM users WHERE id =')) {
           return qr<{ id: number }>([], 0);
         }
         throw new Error(`unexpected query: ${text}`);
@@ -176,7 +187,7 @@ describe('POST /chats (one-to-one)', () => {
     const token = signToken({ sub: 1, username: 'alice' });
     const { res } = makeRes();
 
-    const errors = await invoke(createChat, { ...makeAuthReq(token), body: { userId: 999 } }, res);
+    const errors = await withAuth(token, createChat, { body: { userId: 999 } }, res);
 
     assert.equal(errors.length, 1);
     const err = errors[0] as ApiError;
@@ -187,7 +198,10 @@ describe('POST /chats (one-to-one)', () => {
   it('rejects duplicate chat (409)', async () => {
     const fakeDb = {
       query: async (text: string) => {
-        if (text.startsWith('SELECT c.id FROM chats c JOIN chat_members')) {
+        if (text.includes('SELECT id FROM users WHERE id =')) {
+          return qr([{ id: 2 }], 1);
+        }
+        if (text.includes('SELECT c.id FROM chats c JOIN chat_members')) {
           return qr<{ id: number }>([{ id: 1 }], 1);
         }
         throw new Error(`unexpected query: ${text}`);
@@ -216,7 +230,25 @@ describe('POST /chats (one-to-one)', () => {
   });
 
   it('rejects invalid userId (400)', async () => {
-    const { createChat } = createChatHandlers();
+    const fakeDb = {
+      query: async (text: string) => {
+        if (text.includes('SELECT id FROM users WHERE id =')) {
+          return qr<{ id: number }>([{ id: -1 }], 1); // Shouldn't matter, validation happens first
+        }
+        throw new Error(`unexpected query: ${text}`);
+      },
+      connect: async () => ({
+        query: async (text: string) => {
+          if (text === 'BEGIN') return qr([]);
+          if (text === 'COMMIT') return qr([]);
+          if (text === 'ROLLBACK') return qr([]);
+          return fakeDb.query(text, []);
+        },
+        release: () => {},
+      }),
+    } as unknown as Parameters<typeof createChatHandlers>[0];
+
+    const { createChat } = createChatHandlers(fakeDb);
     const token = signToken({ sub: 1, username: 'alice' });
     const { res } = makeRes();
 
@@ -233,13 +265,13 @@ describe('GET /chats (list)', () => {
   it('returns chats for the authenticated user with members', async () => {
     const fakeDb = {
       query: async (text: string, params: unknown[]) => {
-        if (text.startsWith('SELECT c.id, c.created_at FROM chats c JOIN chat_members')) {
+        if (text.includes('SELECT c.id') && text.includes('chats c') && text.includes('chat_members')) {
           return qr([
             { id: 1, created_at: new Date('2026-01-01T00:00:00Z') },
             { id: 2, created_at: new Date('2026-01-02T00:00:00Z') },
           ]);
         }
-        if (text.startsWith('SELECT cm.chat_id, u.id, u.username FROM chat_members')) {
+        if (text.includes('SELECT cm.chat_id') && text.includes('chat_members') && text.includes('users u')) {
           return qr([
             { chat_id: 1, id: 1, username: 'alice' },
             { chat_id: 1, id: 2, username: 'bob' },
@@ -256,7 +288,7 @@ describe('GET /chats (list)', () => {
     const token = signToken({ sub: 1, username: 'alice' });
     const { res, body } = makeRes();
 
-    const errors = await invoke(getChats, makeAuthReq(token), res);
+    const errors = await withAuth(token, getChats, {}, res);
 
     assert.deepEqual(errors, []);
     const chats = body() as { id: number; members: { id: number; username: string }[] }[];
@@ -265,21 +297,10 @@ describe('GET /chats (list)', () => {
     assert.equal(chats[1].members.length, 2);
   });
 
-  async function withAuth(
-  token: string,
-  handler: RequestHandler,
-  req: Partial<Request>,
-  res: Response,
-): Promise<unknown[]> {
-  const { res: authRes } = makeRes();
-  await invoke(requireAuth as RequestHandler, makeAuthReq(token), authRes);
-  return invoke(handler, { ...req, ...makeAuthReq(token), user: authRes.locals?.user }, res);
-}
-
   it('returns empty array when user has no chats', async () => {
     const fakeDb = {
       query: async (text: string) => {
-        if (text.startsWith('SELECT c.id, c.created_at FROM chats c JOIN chat_members')) {
+        if (text.includes('SELECT c.id') && text.includes('chats c') && text.includes('chat_members')) {
           return qr([]);
         }
         throw new Error(`unexpected query: ${text}`);
@@ -301,7 +322,7 @@ describe('GET /chats (list)', () => {
   it('only returns chats where the user is a member (authorization)', async () => {
     const fakeDb = {
       query: async (text: string, params: unknown[]) => {
-        if (text.startsWith('SELECT c.id, c.created_at FROM chats c JOIN chat_members')) {
+        if (text.includes('SELECT c.id') && text.includes('chats c') && text.includes('chat_members')) {
           // User 1 has chat 1; user 2 has chat 2; they shouldn't see each other's.
           const userId = params[0];
           if (userId === 1) {
@@ -309,7 +330,7 @@ describe('GET /chats (list)', () => {
           }
           return qr([{ id: 2, created_at: new Date() }]);
         }
-        if (text.startsWith('SELECT cm.chat_id, u.id, u.username FROM chat_members')) {
+        if (text.includes('SELECT cm.chat_id') && text.includes('chat_members') && text.includes('users u')) {
           const chatIds = params[0] as number[];
           if (chatIds.includes(1)) {
             return qr([{ chat_id: 1, id: 1, username: 'alice' }, { chat_id: 1, id: 2, username: 'bob' }]);
