@@ -9,4 +9,7 @@ if (!config.databaseUrl) {
 
 // Single shared connection pool. Controllers/services go through the db
 // façade (src/db/index.ts) and never create connections themselves.
-export const pool = new Pool({ connectionString: config.databaseUrl });
+export const pool = new Pool({
+  connectionString: config.databaseUrl,
+  connectionTimeoutMillis: 3000,
+});

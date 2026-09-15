@@ -17,13 +17,17 @@
     "db:migrate": "tsx src/db/migrate.ts"
   },
   "dependencies": {
+    "bcryptjs": "^3.0.3",
     "dotenv": "^16.4.7",
     "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.3",
     "pg": "^8.23.0",
     "ws": "^8.18.3"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/express": "^5.0.1",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.0.0",
     "@types/pg": "^8.23.1",
     "@types/ws": "^8.5.13",

@@ -6,6 +6,15 @@ export { pool } from './pool.js';
 export { applyMigrations } from './migrations.js';
 export type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 
+/** Minimal query interface consumed by controllers/services.
+ * Enables dependency injection for unit tests (swap in a fake database). */
+export interface Queryable {
+  query<T extends QueryResultRow = QueryResultRow>(
+    text: string,
+    params?: unknown[],
+  ): Promise<QueryResult<T>>;
+}
+
 /**
  * Single database façade used by controllers/services. Nothing in the app
  * creates its own connections — always go through `db`.
