@@ -4,8 +4,10 @@ Base URL: `http://<host>:<port>`
 
 **Deel 1:** health-check endpoint.
 **Deel 2:** PostgreSQL schema (users, chats, chat_members, messages).
-**Deel 3 (this PR):** authentication (register, login, protected endpoints).
-**Deel 4+:** chat rooms, messages — WebSocket transport at `/ws`.
+**Deel 3:** authentication (register, login, protected endpoints).
+**Deel 4:** one-to-one chats (create, list).
+**Deel 5:** (reserved)
+**Deel 6:** WebSocket realtime messaging at `/ws`.
 
 ---
 
@@ -29,7 +31,7 @@ Status `401`.
 
 ---
 
-## Endpoints
+## REST Endpoints
 
 ### Register
 
@@ -65,7 +67,7 @@ Validation rules:
 }
 ```
 
-**400 Bad Request** — Validation error (missing/invalid username or password).
+**400 Bad Request** — Validation error.
 
 ```json
 { "error": "Username is required" }
@@ -87,8 +89,6 @@ Authenticate with existing credentials.
 
 #### Request
 
-Content-Type: `application/json`
-
 ```json
 {
   "username": "twan",
@@ -104,7 +104,7 @@ Content-Type: `application/json`
 { "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." }
 ```
 
-**401 Unauthorized** — Invalid credentials (always generic message).
+**401 Unauthorized** — Invalid credentials (generic message).
 
 ```json
 { "error": "Invalid credentials" }
@@ -132,14 +132,229 @@ Returns the authenticated user's profile. Requires authentication.
 
 **401 Unauthorized** — Missing or invalid token.
 
+**404 Not Found** — Authenticated user deleted.
+
+---
+
+### Create One-to-One Chat
+
+`POST /chats`
+
+Creates a 1:1 chat between the authenticated user and another user. Requires authentication.
+
+#### Request
+
 ```json
-{ "error": "Authentication required" }
+{
+  "userId": 2
+}
 ```
 
-**404 Not Found** — Authenticated user deleted (should not occur normally).
+Validation rules:
+- `userId`: required, positive integer, must exist, cannot be yourself
+- Duplicate chats are prevented (409)
+
+#### Responses
+
+**201 Created**
 
 ```json
-{ "error": "User not found" }
+{
+  "id": 5,
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "members": [
+    { "id": 1, "username": "alice" },
+    { "id": 2, "username": "bob" }
+  ]
+}
+```
+
+**400 Bad Request** — Invalid `userId` or chat with yourself.
+
+**404 Not Found** — Target user does not exist.
+
+**409 Conflict** — Chat already exists between these two users.
+
+**401 Unauthorized** — Missing or invalid token.
+
+---
+
+### List User's Chats
+
+`GET /chats`
+
+Returns all chats where the authenticated user is a member. Requires authentication.
+
+#### Responses
+
+**200 OK**
+
+```json
+[
+  {
+    "id": 5,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "members": [
+      { "id": 1, "username": "alice" },
+      { "id": 2, "username": "bob" }
+    ]
+  },
+  {
+    "id": 3,
+    "createdAt": "2026-01-02T00:00:00.000Z",
+    "members": [
+      { "id": 1, "username": "alice" },
+      { "id": 3, "username": "carol" }
+    ]
+  }
+]
+```
+
+Empty array if user has no chats.
+
+**401 Unauthorized** — Missing or invalid token.
+
+---
+
+## WebSocket API
+
+Endpoint: `ws://<host>:<port>/ws`
+
+All WebSocket communication uses JSON messages with this structure:
+
+```json
+{
+  "type": "<event-type>",
+  "payload": { ... }
+}
+```
+
+### Connection Flow
+
+1. Connect to `/ws`
+2. Send `auth` message with JWT token
+3. Receive `auth.ok` on success, or `error` on failure
+4. After authentication, send/receive other events
+
+---
+
+### Client → Server Events
+
+#### Authenticate
+
+```json
+{
+  "type": "auth",
+  "payload": {
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+  }
+}
+```
+
+**Response on success:**
+
+```json
+{
+  "type": "auth.ok",
+  "payload": {
+    "userId": 1,
+    "username": "twan"
+  }
+}
+```
+
+**Response on failure:**
+
+```json
+{
+  "type": "error",
+  "payload": {
+    "code": "UNAUTHORIZED",
+    "message": "Invalid token"
+  }
+}
+```
+
+---
+
+#### Send Message
+
+```json
+{
+  "type": "message.send",
+  "payload": {
+    "chatId": 5,
+    "content": "Hallo!"
+  }
+}
+```
+
+Validation rules:
+- `chatId`: required, positive integer, must be a chat the user is member of
+- `content`: required, non-empty string
+
+**Response on success:** `message.created` is broadcast to all chat members (including sender).
+
+**Response on failure:**
+
+```json
+{
+  "type": "error",
+  "payload": {
+    "code": "UNAUTHORIZED | INVALID_PAYLOAD | FORBIDDEN | INTERNAL_ERROR",
+    "message": "..."
+  }
+}
+```
+
+Error codes:
+- `UNAUTHORIZED` — Not authenticated
+- `INVALID_PAYLOAD` — Missing/invalid `chatId` or `content`
+- `FORBIDDEN` — User is not a member of the chat
+- `INTERNAL_ERROR` — Server error (message not persisted)
+
+---
+
+### Server → Client Events
+
+#### Message Created
+
+Broadcast to all members of a chat when a message is successfully persisted.
+
+```json
+{
+  "type": "message.created",
+  "payload": {
+    "id": 42,
+    "chatId": 5,
+    "senderId": 1,
+    "content": "Hallo!",
+    "createdAt": "2026-01-01T12:00:00.000Z"
+  }
+}
+```
+
+Fields:
+- `id`: message ID (BIGINT)
+- `chatId`: chat ID
+- `senderId`: user ID of sender
+- `content`: message text
+- `createdAt`: ISO 8601 timestamp
+
+---
+
+#### Error
+
+Sent when a client event fails validation or authorization.
+
+```json
+{
+  "type": "error",
+  "payload": {
+    "code": "UNAUTHORIZED",
+    "message": "Not authenticated"
+  }
+}
 ```
 
 ---
@@ -148,26 +363,18 @@ Returns the authenticated user's profile. Requires authentication.
 
 `GET /health`
 
-Returns `200 OK` when the backend is reachable. Use for uptime checks and load balancer probes.
-
-### Response
-
-Status `200` — `application/json`
+Returns `200 OK` when the backend is reachable.
 
 ```json
-{
-  "status": "ok"
-}
+{ "status": "ok" }
 ```
 
 ---
 
 ## Appendix
 
-HTTP errors returned by the backend always follow this shape:
+HTTP errors always follow this shape:
 
 ```json
-{
-  "error": "Human-readable message"
-}
+{ "error": "Human-readable message" }
 ```

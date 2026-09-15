@@ -85,7 +85,7 @@ export function createChatHandlers(database: Queryable = db): {
         res.status(201).json({
           id: chat.id,
           createdAt: chat.created_at,
-          members: membersResult.rows.map((m) => ({ id: m.id, username: m.username })),
+          members: membersResult.rows.map((m: { id: number; username: string }) => ({ id: m.id, username: m.username })),
         } satisfies ChatResponse);
       } catch (err) {
         await client.query('ROLLBACK');

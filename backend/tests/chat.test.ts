@@ -121,6 +121,29 @@ describe('POST /chats (one-to-one)', () => {
         }
         throw new Error(`unexpected query: ${text}`);
       },
+      const fakeDb = {
+      query: async (text: string, params: unknown[]) => {
+        if (text.includes('SELECT id FROM users WHERE id =')) {
+          const id = params[0] as number;
+          return qr(users.has(id) ? [{ id }] : [], users.has(id) ? 1 : 0);
+        }
+        if (text.includes('SELECT c.id FROM chats c JOIN chat_members')) {
+          return qr<{ id: number }>([], 0);
+        }
+        if (text.includes('INSERT INTO chats')) {
+          return qr([{ id: chatId++, created_at: new Date() }]);
+        }
+        if (text.includes('INSERT INTO chat_members')) {
+          return qr([], 2);
+        }
+        if (text.includes('SELECT u.id, u.username FROM chat_members')) {
+          return qr([
+            { chat_id: 1, id: 1, username: 'alice' },
+            { chat_id: 1, id: 2, username: 'bob' },
+          ]);
+        }
+        throw new Error(`unexpected query: ${text}`);
+      },
       connect: async () => ({
         query: async (text: string, params: unknown[]) => {
           if (text === 'BEGIN') return qr([]);
@@ -177,7 +200,7 @@ describe('POST /chats (one-to-one)', () => {
           if (text === 'BEGIN') return qr([]);
           if (text === 'COMMIT') return qr([]);
           if (text === 'ROLLBACK') return qr([]);
-          return fakeDb.query(text, []);
+          return (fakeDb as { query: typeof fakeDb.query }).query(text, []);
         },
         release: () => {},
       }),
@@ -211,7 +234,7 @@ describe('POST /chats (one-to-one)', () => {
           if (text === 'BEGIN') return qr([]);
           if (text === 'COMMIT') return qr([]);
           if (text === 'ROLLBACK') return qr([]);
-          return fakeDb.query(text, []);
+          return (fakeDb as { query: typeof fakeDb.query }).query(text, []);
         },
         release: () => {},
       }),
@@ -221,7 +244,7 @@ describe('POST /chats (one-to-one)', () => {
     const token = signToken({ sub: 1, username: 'alice' });
     const { res } = makeRes();
 
-    const errors = await invoke(createChat, { ...makeAuthReq(token), body: { userId: 2 } }, res);
+    const errors = await withAuth(token, createChat, { body: { userId: 2 } }, res);
 
     assert.equal(errors.length, 1);
     const err = errors[0] as ApiError;
@@ -242,7 +265,7 @@ describe('POST /chats (one-to-one)', () => {
           if (text === 'BEGIN') return qr([]);
           if (text === 'COMMIT') return qr([]);
           if (text === 'ROLLBACK') return qr([]);
-          return fakeDb.query(text, []);
+          return (fakeDb as { query: typeof fakeDb.query }).query(text, []);
         },
         release: () => {},
       }),
@@ -252,7 +275,7 @@ describe('POST /chats (one-to-one)', () => {
     const token = signToken({ sub: 1, username: 'alice' });
     const { res } = makeRes();
 
-    const errors = await invoke(createChat, { ...makeAuthReq(token), body: { userId: -1 } }, res);
+    const errors = await withAuth(token, createChat, { body: { userId: -1 } }, res);
 
     assert.equal(errors.length, 1);
     const err = errors[0] as ApiError;

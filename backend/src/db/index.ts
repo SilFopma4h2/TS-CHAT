@@ -13,6 +13,7 @@ export interface Queryable {
     text: string,
     params?: unknown[],
   ): Promise<QueryResult<T>>;
+  connect(): Promise<PoolClient>;
 }
 
 /**
