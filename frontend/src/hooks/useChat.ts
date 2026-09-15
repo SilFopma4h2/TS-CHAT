@@ -4,11 +4,16 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { ChatMessage, Conversation, UserType } from '@/types/chat';
 import { INITIAL_CONVERSATIONS, INITIAL_MOCK_MESSAGES, USERS } from '@/lib/constants';
 import { generateId } from '@/lib/utils';
+import { authApi, chatsApi, messagesApi } from '@/lib/api';
+import { apiClient } from '@/lib/api/client';
+import { webSocketService } from '@/services/websocket';
+import { WebSocketMessage } from '@/types/events';
 import { getMockReply } from '@/services/mockChatService';
 
 export function useChat() {
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
   const [currentUser, setCurrentUser] = useState<UserType>('sil');
+  const [user, setUser] = useState({ id: "sil", username: "sil", name: "Sil", role: "Frontend & Infra", isOnline: true });
   const [conversations, setConversations] = useState<Conversation[]>(INITIAL_CONVERSATIONS);
   const [activeConversationId, setActiveConversationId] = useState<string>('conv-sil-twan');
   const [messagesByConversation, setMessagesByConversation] =
@@ -18,6 +23,7 @@ export function useChat() {
   const [partnerIsOnline, setPartnerIsOnline] = useState<boolean>(true);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'disconnected' | 'mock'>('mock');
   const [autoReplyEnabled, setAutoReplyEnabled] = useState<boolean>(true);
 
   const partnerId: UserType = currentUser === 'sil' ? 'twan' : 'sil';
@@ -25,7 +31,6 @@ export function useChat() {
     ...USERS[partnerId],
     isOnline: partnerIsOnline,
   };
-  const user = USERS[currentUser];
 
   const timeoutsRef = useRef<NodeJS.Timeout[]>([]);
   const activeConversationIdRef = useRef(activeConversationId);
@@ -62,11 +67,22 @@ export function useChat() {
     );
   }, []);
 
-  const login = useCallback((selectedUser: UserType) => {
-    setCurrentUser(selectedUser);
-    setIsAuthenticated(true);
-    setIsPartnerTyping(false);
-  }, []);
+  const login = useCallback(async (credentials: { username: string; password?: string }) => {
+    setIsLoading(true); setError(null);
+    try {
+      const res = await authApi.login(credentials);
+      setIsAuthenticated(true);
+      setCurrentUser(res.user.username as UserType);
+      setUser({ id: res.user.id, username: res.user.username || res.user.id, name: res.user.name || res.user.username, role: res.user.role || '', isOnline: res.user.isOnline ?? true });
+      webSocketService.init('ws://localhost:3000/ws');
+      webSocketService.connect();
+      try { const chats = await chatsApi.getChats(); setConversations(chats.map(c => ({ id: c.id, partnerId: (c.participants.find(p => p.id !== res.user.id)?.id as UserType) || partnerId, title: c.name || '', subtitle: '', unreadCount: c.unreadCount || 0, updatedAt: c.updatedAt })) as Conversation[]); } catch { /* backend missing */ }
+      setConnectionStatus('connected');
+    } catch (e: any) {
+      setError(e?.message || 'Inloggen mislukt');
+      setConnectionStatus('disconnected');
+    } finally { setIsLoading(false); }
+  }, [partnerId]);
 
   const logout = useCallback(() => {
     setIsAuthenticated(false);
@@ -81,14 +97,12 @@ export function useChat() {
 
   const selectConversation = useCallback((convId: string) => {
     setActiveConversationId(convId);
-    // Mark as read
-    setConversations((prev) =>
-      prev.map((c) => (c.id === convId ? { ...c, unreadCount: 0 } : c))
-    );
+    setConversations((prev) => prev.map((c) => (c.id === convId ? { ...c, unreadCount: 0 } : c)));
+    messagesApi.getMessages(convId).catch(() => { /* backend missing — keep mock */ });
   }, []);
 
   const sendMessage = useCallback(
-    (text: string) => {
+    async (text: string) => {
       if (!text.trim() || !activeConversationId) return;
 
       const newMessage: ChatMessage = {

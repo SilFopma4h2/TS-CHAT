@@ -1,4 +1,5 @@
 'use client';
+import { UserType } from '@/types/chat';
 
 import React, { useState } from 'react';
 import { useChat } from '@/hooks/useChat';
@@ -43,7 +44,7 @@ export default function Home() {
 
   // 1. Scherm 1: Login / Register Scherm
   if (!isAuthenticated) {
-    return <AuthScreen onLogin={login} />;
+    return <AuthScreen onLogin={(u: UserType) => login({ username: u })} />;
   }
 
   const handleSelectConversation = (id: string) => {
@@ -63,7 +64,7 @@ export default function Home() {
           conversations={conversations}
           selectedConversationId={activeConversationId}
           onSelectConversation={handleSelectConversation}
-          currentUser={user}
+          currentUser={user as any}
           onLogout={logout}
           onSwitchUser={switchUser}
           partnerIsOnline={partnerIsOnline}
