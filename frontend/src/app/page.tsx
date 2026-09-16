@@ -1,5 +1,6 @@
 'use client';
 import { UserType } from '@/types/chat';
+import { USERS } from '@/lib/constants';
 
 import React, { useState } from 'react';
 import { useChat } from '@/hooks/useChat';
@@ -14,7 +15,6 @@ export default function Home() {
   const {
     isAuthenticated,
     currentUser,
-    user,
     partner,
     partnerIsOnline,
     conversations,
@@ -64,7 +64,7 @@ export default function Home() {
           conversations={conversations}
           selectedConversationId={activeConversationId}
           onSelectConversation={handleSelectConversation}
-          currentUser={user as {id:string}}
+          currentUser={USERS[currentUser]}
           onLogout={logout}
           onSwitchUser={switchUser}
           partnerIsOnline={partnerIsOnline}
