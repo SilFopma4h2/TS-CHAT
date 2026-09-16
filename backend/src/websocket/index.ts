@@ -38,6 +38,7 @@ interface AuthenticatedConnection {
 export class WebSocketManager {
   private connections = new Map<WebSocket, AuthenticatedConnection>();
   private userConnections = new Map<number, Set<WebSocket>>();
+  private userChats = new Map<number, Set<number>>(); // userId -> set of chatIds
 
   constructor() {}
 
@@ -104,13 +105,25 @@ export class WebSocketManager {
       const conn: AuthenticatedConnection = { socket, user, chats };
       this.connections.set(socket, conn);
 
+      // Check if this is the user's first connection (going online)
+      const existingSockets = this.userConnections.get(user.id);
+      const isFirstConnection = !existingSockets || existingSockets.size === 0;
+
       if (!this.userConnections.has(user.id)) {
         this.userConnections.set(user.id, new Set());
       }
       this.userConnections.get(user.id)!.add(socket);
 
+      // Store user's chats for presence broadcasting
+      this.userChats.set(user.id, chats);
+
       this.send(socket, { type: 'auth.ok', payload: { userId: user.id, username: user.username } });
       console.log(`User ${user.username} (id: ${user.id}) authenticated via WebSocket`);
+
+      // Broadcast online status to chat members if this was the first connection
+      if (isFirstConnection) {
+        this.broadcastPresence(user.id, 'user.online');
+      }
     } catch {
       this.sendError(socket, 'UNAUTHORIZED', 'Invalid token');
       socket.close(4001, 'Invalid token');
@@ -211,15 +224,45 @@ export class WebSocketManager {
   private handleClose(socket: WebSocket): void {
     const conn = this.connections.get(socket);
     if (conn) {
-      const userSockets = this.userConnections.get(conn.user.id);
+      const userId = conn.user.id;
+      const userSockets = this.userConnections.get(userId);
       if (userSockets) {
         userSockets.delete(socket);
         if (userSockets.size === 0) {
-          this.userConnections.delete(conn.user.id);
+          this.userConnections.delete(userId);
+          // This was the last connection - user goes offline
+          this.broadcastPresence(userId, 'user.offline');
+          this.userChats.delete(userId);
         }
       }
       this.connections.delete(socket);
-      console.log(`User ${conn.user.username} (id: ${conn.user.id}) disconnected`);
+      console.log(`User ${conn.user.username} (id: ${userId}) disconnected`);
+    }
+  }
+
+  /** Broadcast online/offline presence to relevant chat members. */
+  private broadcastPresence(userId: number, type: 'user.online' | 'user.offline'): void {
+    const chats = this.userChats.get(userId);
+    if (!chats || chats.size === 0) return;
+
+    const payload = { userId };
+
+    // For each chat the user is in, broadcast to all other members
+    for (const chatId of chats) {
+      // We need to get chat members from the database to know who to notify
+      // For now, broadcast to all connected users who have this chat in their chats set
+      for (const [otherUserId, otherChats] of this.userChats.entries()) {
+        if (otherUserId !== userId && otherChats.has(chatId)) {
+          const sockets = this.userConnections.get(otherUserId);
+          if (sockets) {
+            for (const socket of sockets) {
+              if (socket.readyState === WebSocket.OPEN) {
+                this.send(socket, { type, payload });
+              }
+            }
+          }
+        }
+      }
     }
   }
 

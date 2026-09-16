@@ -22,6 +22,11 @@ function qr<T extends QueryResultRow>(
   return { rows, rowCount, command: '', oid: 0, fields: [] } as unknown as QueryResult<T>;
 }
 
+/** Normalize query text for matching (collapses whitespace). */
+function nq(text: string): string {
+  return text.replace(/\s+/g, ' ');
+}
+
 async function invoke(
   handler: RequestHandler,
   req: Partial<Request>,
@@ -100,43 +105,32 @@ describe('POST /chats (one-to-one)', () => {
 
     const fakeDb = {
       query: async (text: string, params: unknown[]) => {
-        if (text.includes('SELECT id FROM users WHERE id =')) {
+        const normalized = nq(text);
+        if (normalized.includes('SELECT id FROM users WHERE id =')) {
           const id = params[0] as number;
           return qr(users.has(id) ? [{ id }] : [], users.has(id) ? 1 : 0);
         }
-        if (text.includes('SELECT c.id FROM chats c JOIN chat_members')) {
+        if (normalized.includes('SELECT id FROM users WHERE username =')) {
+          const username = params[0] as string;
+          const user = Array.from(users.values()).find(u => u.id === users.get(users.size)?.id); // Find by username
+          // Since we don't store by username in map, just return empty for now (user doesn't exist)
           return qr<{ id: number }>([], 0);
         }
-        if (text.includes('INSERT INTO chats')) {
-          return qr([{ id: chatId++, created_at: new Date() }]);
+        if (normalized.includes('INSERT INTO users')) {
+          const newId = users.size + 1;
+          users.set(newId, { id: newId, passwordHash: params[1] as string });
+          return qr([{ id: newId, username: params[0] as string, created_at: new Date() }]);
         }
-        if (text.includes('INSERT INTO chat_members')) {
-          return qr([], 2);
-        }
-        if (text.includes('SELECT u.id, u.username FROM chat_members')) {
-          return qr([
-            { chat_id: 1, id: 1, username: 'alice' },
-            { chat_id: 1, id: 2, username: 'bob' },
-          ]);
-        }
-        throw new Error(`unexpected query: ${text}`);
-      },
-      const fakeDb = {
-      query: async (text: string, params: unknown[]) => {
-        if (text.includes('SELECT id FROM users WHERE id =')) {
-          const id = params[0] as number;
-          return qr(users.has(id) ? [{ id }] : [], users.has(id) ? 1 : 0);
-        }
-        if (text.includes('SELECT c.id FROM chats c JOIN chat_members')) {
+        if (normalized.includes('SELECT c.id FROM chats c JOIN chat_members')) {
           return qr<{ id: number }>([], 0);
         }
-        if (text.includes('INSERT INTO chats')) {
+        if (normalized.includes('INSERT INTO chats')) {
           return qr([{ id: chatId++, created_at: new Date() }]);
         }
-        if (text.includes('INSERT INTO chat_members')) {
+        if (normalized.includes('INSERT INTO chat_members')) {
           return qr([], 2);
         }
-        if (text.includes('SELECT u.id, u.username FROM chat_members')) {
+        if (normalized.includes('SELECT u.id, u.username FROM chat_members')) {
           return qr([
             { chat_id: 1, id: 1, username: 'alice' },
             { chat_id: 1, id: 2, username: 'bob' },
@@ -149,16 +143,16 @@ describe('POST /chats (one-to-one)', () => {
           if (text === 'BEGIN') return qr([]);
           if (text === 'COMMIT') return qr([]);
           if (text === 'ROLLBACK') return qr([]);
-          return fakeDb.query(text, params);
+          return fakeDb!.query(text, params);
         },
         release: () => {},
       }),
     } as unknown as Parameters<typeof createChatHandlers>[0];
 
     const { createChat } = createChatHandlers(fakeDb);
-    const { register } = createAuthHandlers();
+    const { register } = createAuthHandlers(fakeDb);
 
-    // Register two users.
+    // Register two users in the fake DB.
     await register({ body: { username: 'alice', password: 'secret123' } } as never, { status() {}, json() {} } as never, () => {});
     await register({ body: { username: 'bob', password: 'secret123' } } as never, { status() {}, json() {} } as never, () => {});
 
@@ -190,7 +184,7 @@ describe('POST /chats (one-to-one)', () => {
   it('rejects non-existent user (404)', async () => {
     const fakeDb = {
       query: async (text: string, params: unknown[]) => {
-        if (text.includes('SELECT id FROM users WHERE id =')) {
+        if (nq(text).includes('SELECT id FROM users WHERE id =')) {
           return qr<{ id: number }>([], 0);
         }
         throw new Error(`unexpected query: ${text}`);
@@ -200,7 +194,7 @@ describe('POST /chats (one-to-one)', () => {
           if (text === 'BEGIN') return qr([]);
           if (text === 'COMMIT') return qr([]);
           if (text === 'ROLLBACK') return qr([]);
-          return (fakeDb as { query: typeof fakeDb.query }).query(text, []);
+          return (fakeDb as { query: (text: string, params: unknown[]) => Promise<unknown> }).query(text, []);
         },
         release: () => {},
       }),
@@ -220,21 +214,21 @@ describe('POST /chats (one-to-one)', () => {
 
   it('rejects duplicate chat (409)', async () => {
     const fakeDb = {
-      query: async (text: string) => {
-        if (text.includes('SELECT id FROM users WHERE id =')) {
+      query: async (text: string, params: unknown[]) => {
+        if (nq(text).includes('SELECT id FROM users WHERE id =')) {
           return qr([{ id: 2 }], 1);
         }
-        if (text.includes('SELECT c.id FROM chats c JOIN chat_members')) {
+        if (nq(text).includes('SELECT c.id FROM chats c JOIN chat_members')) {
           return qr<{ id: number }>([{ id: 1 }], 1);
         }
         throw new Error(`unexpected query: ${text}`);
       },
       connect: async () => ({
-        query: async (text: string) => {
+        query: async (text: string, params: unknown[]) => {
           if (text === 'BEGIN') return qr([]);
           if (text === 'COMMIT') return qr([]);
           if (text === 'ROLLBACK') return qr([]);
-          return (fakeDb as { query: typeof fakeDb.query }).query(text, []);
+          return (fakeDb! as { query: (text: string, params: unknown[]) => Promise<unknown> }).query(text, params);
         },
         release: () => {},
       }),
@@ -255,7 +249,7 @@ describe('POST /chats (one-to-one)', () => {
   it('rejects invalid userId (400)', async () => {
     const fakeDb = {
       query: async (text: string) => {
-        if (text.includes('SELECT id FROM users WHERE id =')) {
+        if (nq(text).includes('SELECT id FROM users WHERE id =')) {
           return qr<{ id: number }>([{ id: -1 }], 1); // Shouldn't matter, validation happens first
         }
         throw new Error(`unexpected query: ${text}`);
@@ -265,7 +259,7 @@ describe('POST /chats (one-to-one)', () => {
           if (text === 'BEGIN') return qr([]);
           if (text === 'COMMIT') return qr([]);
           if (text === 'ROLLBACK') return qr([]);
-          return (fakeDb as { query: typeof fakeDb.query }).query(text, []);
+          return (fakeDb as { query: (text: string, params: unknown[]) => Promise<unknown> }).query(text, []);
         },
         release: () => {},
       }),
@@ -294,7 +288,7 @@ describe('GET /chats (list)', () => {
             { id: 2, created_at: new Date('2026-01-02T00:00:00Z') },
           ]);
         }
-        if (text.includes('SELECT cm.chat_id') && text.includes('chat_members') && text.includes('users u')) {
+        if (nq(text).includes('SELECT cm.chat_id') && nq(text).includes('chat_members') && nq(text).includes('users u')) {
           return qr([
             { chat_id: 1, id: 1, username: 'alice' },
             { chat_id: 1, id: 2, username: 'bob' },
@@ -314,10 +308,10 @@ describe('GET /chats (list)', () => {
     const errors = await withAuth(token, getChats, {}, res);
 
     assert.deepEqual(errors, []);
-    const chats = body() as { id: number; members: { id: number; username: string }[] }[];
+    const chats = body() as Array<{ id: number; members: { id: number; username: string }[] }>;
     assert.equal(chats.length, 2);
-    assert.equal(chats[0].members.length, 2);
-    assert.equal(chats[1].members.length, 2);
+    assert.equal(chats[0]?.members.length, 2);
+    assert.equal(chats[1]?.members.length, 2);
   });
 
   it('returns empty array when user has no chats', async () => {
@@ -353,7 +347,7 @@ describe('GET /chats (list)', () => {
           }
           return qr([{ id: 2, created_at: new Date() }]);
         }
-        if (text.includes('SELECT cm.chat_id') && text.includes('chat_members') && text.includes('users u')) {
+        if (nq(text).includes('SELECT cm.chat_id') && nq(text).includes('chat_members') && nq(text).includes('users u')) {
           const chatIds = params[0] as number[];
           if (chatIds.includes(1)) {
             return qr([{ chat_id: 1, id: 1, username: 'alice' }, { chat_id: 1, id: 2, username: 'bob' }]);

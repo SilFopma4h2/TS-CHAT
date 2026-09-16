@@ -8,6 +8,7 @@ Base URL: `http://<host>:<port>`
 **Deel 4:** one-to-one chats (create, list).
 **Deel 5:** (reserved)
 **Deel 6:** WebSocket realtime messaging at `/ws`.
+**Deel 7:** WebSocket presence (online/offline).
 
 ---
 
@@ -356,6 +357,46 @@ Sent when a client event fails validation or authorization.
   }
 }
 ```
+
+---
+
+### Presence Events
+
+Presence events are automatically broadcast when users come online or go offline. They are sent to all members of chats that the user participates in.
+
+#### User Online
+
+Broadcast when a user authenticates their first WebSocket connection.
+
+```json
+{
+  "type": "user.online",
+  "payload": {
+    "userId": 1
+  }
+}
+```
+
+#### User Offline
+
+Broadcast when a user's last WebSocket connection closes.
+
+```json
+{
+  "type": "user.offline",
+  "payload": {
+    "userId": 1
+  }
+}
+```
+
+#### Presence Behavior
+
+- A user is considered **online** when they have at least one authenticated WebSocket connection.
+- A user is considered **offline** when they have zero authenticated WebSocket connections.
+- Presence events are only sent to users who share at least one chat with the user whose status changed.
+- Users who are not authenticated via WebSocket do not receive presence events.
+- Presence state is not persisted in the database (ephemeral, in-memory only).
 
 ---
 
