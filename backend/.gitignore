@@ -1,0 +1,6 @@
+# Node / TypeScript build output and dependencies
+node_modules/
+dist/
+
+# Logs
+*.log

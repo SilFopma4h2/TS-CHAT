@@ -1,320 +1,421 @@
-# DuoChat (TS-CHAT) API Specificatie
+# DuoChat API
 
-Base URL: `http://<host>:<port>` (standaard `http://localhost:3000` in development)  
-WebSocket URL: `ws://<host>:<port>/ws`
+Base URL: `http://<host>:<port>`
 
----
-
-## Overzicht
-
-| Module | Methode | Endpoint | Beschrijving | Status |
-| :--- | :--- | :--- | :--- | :--- |
-| **Health** | `GET` | `/health` | Uptime check van backend & database | Geïmplementeerd (Deel 1) |
-| **Auth** | `POST` | `/api/auth/login` | Inloggen met gebruikersnaam & optioneel wachtwoord | Frontend gereed (Contract Deel 2) |
-| **Auth** | `POST` | `/api/auth/register` | Nieuwe gebruiker registreren | Frontend gereed (Contract Deel 2) |
-| **Auth** | `GET` | `/api/auth/me` | Ingelogde gebruikersgegevens ophalen | Frontend gereed (Contract Deel 2) |
-| **Auth** | `POST` | `/api/auth/logout` | Sessie beëindigen | Frontend gereed (Contract Deel 2) |
-| **Chats** | `GET` | `/api/chats` | Overzicht van actieve gesprekken | Frontend gereed (Contract Deel 2) |
-| **Chats** | `POST` | `/api/chats` | Direct gesprek starten of ophalen met partner | Frontend gereed (Contract Deel 2) |
-| **Chats** | `GET` | `/api/chats/:id` | Details van één specifiek gesprek | Frontend gereed (Contract Deel 2) |
-| **Messages**| `GET` | `/api/chats/:chatId/messages` | Historische berichten ophalen | Frontend gereed (Contract Deel 2) |
-| **Messages**| `POST` | `/api/chats/:chatId/messages` | Bericht verzenden via REST (fallback) | Frontend gereed (Contract Deel 2) |
-| **Realtime**| `WS` | `/ws` | Bidirectionele realtime messaging & presence | Frontend types gereed (Transport Deel 1) |
+**Deel 1:** health-check endpoint.
+**Deel 2:** PostgreSQL schema (users, chats, chat_members, messages).
+**Deel 3:** authentication (register, login, protected endpoints).
+**Deel 4:** one-to-one chats (create, list).
+**Deel 5:** (reserved)
+**Deel 6:** WebSocket realtime messaging at `/ws`.
+**Deel 7:** WebSocket presence (online/offline).
 
 ---
 
-## 1. Health
+## Authentication
 
-### `GET /health`
-Controleert of de backend service en eventuele databaseverbinding actief zijn.
+All protected endpoints expect a `Bearer` token in the `Authorization` header:
+
+```
+Authorization: Bearer <jwt-token>
+```
+
+The token is a JWT signed with HS256 containing `{ sub: <userId>, username: <username> }`.
+
+On authentication failure the response is always:
+
+```json
+{ "error": "Authentication required" }
+```
+
+Status `401`.
+
+---
+
+## REST Endpoints
+
+### Register
+
+`POST /auth/register`
+
+Create a new user account.
 
 #### Request
-Geen parameters of body.
 
-#### Response
-Status: `200 OK`  
 Content-Type: `application/json`
-```json
-{
-  "status": "ok"
-}
-```
 
----
-
-## 2. Authenticatie
-
-### `POST /api/auth/login`
-Inloggen van een bestaande gebruiker (Sil of Twan).
-
-#### Request Body
-```json
-{
-  "username": "sil",
-  "password": "optional_or_pincode"
-}
-```
-
-#### Response (`200 OK`)
-```json
-{
-  "user": {
-    "id": "sil",
-    "username": "sil",
-    "name": "Sil",
-    "role": "Frontend & Infra"
-  },
-  "token": "jwt_or_session_token_string"
-}
-```
-
----
-
-### `POST /api/auth/register`
-Registreren van een gebruiker.
-
-#### Request Body
 ```json
 {
   "username": "twan",
-  "password": "optional_or_pincode",
-  "role": "Backend & Realtime"
+  "password": "secure-password"
 }
 ```
 
-#### Response (`201 Created` of `200 OK`)
+Validation rules:
+- `username`: required, 1–32 characters, unique
+- `password`: required, minimum 8 characters
+
+#### Responses
+
+**201 Created** — Account created, token included.
+
 ```json
 {
-  "user": {
-    "id": "twan",
-    "username": "twan",
-    "name": "Twan",
-    "role": "Backend & Realtime"
-  },
-  "token": "jwt_or_session_token_string"
+  "id": 1,
+  "username": "twan",
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
 }
+```
+
+**400 Bad Request** — Validation error.
+
+```json
+{ "error": "Username is required" }
+```
+
+**409 Conflict** — Username already taken.
+
+```json
+{ "error": "Username is already taken" }
 ```
 
 ---
 
-### `GET /api/auth/me`
-Huidige sessie en profiel opvragen.
+### Login
 
-#### Request Headers
-`Authorization: Bearer <token>`
+`POST /auth/login`
 
-#### Response (`200 OK`)
+Authenticate with existing credentials.
+
+#### Request
+
 ```json
 {
-  "id": "sil",
-  "username": "sil",
-  "name": "Sil",
-  "role": "Frontend & Infra",
-  "isOnline": true
+  "username": "twan",
+  "password": "secure-password"
 }
+```
+
+#### Responses
+
+**200 OK** — Login successful, returns JWT.
+
+```json
+{ "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." }
+```
+
+**401 Unauthorized** — Invalid credentials (generic message).
+
+```json
+{ "error": "Invalid credentials" }
 ```
 
 ---
 
-## 3. Gesprekken (Chats)
+### Get Current User
 
-### `GET /api/chats`
-Lijst met alle gesprekken van de ingelogde gebruiker.
+`GET /users/me`
 
-#### Request Headers
-`Authorization: Bearer <token>`
+Returns the authenticated user's profile. Requires authentication.
 
-#### Response (`200 OK`)
+#### Responses
+
+**200 OK**
+
+```json
+{
+  "id": 1,
+  "username": "twan",
+  "createdAt": "2026-01-01T00:00:00.000Z"
+}
+```
+
+**401 Unauthorized** — Missing or invalid token.
+
+**404 Not Found** — Authenticated user deleted.
+
+---
+
+### Create One-to-One Chat
+
+`POST /chats`
+
+Creates a 1:1 chat between the authenticated user and another user. Requires authentication.
+
+#### Request
+
+```json
+{
+  "userId": 2
+}
+```
+
+Validation rules:
+- `userId`: required, positive integer, must exist, cannot be yourself
+- Duplicate chats are prevented (409)
+
+#### Responses
+
+**201 Created**
+
+```json
+{
+  "id": 5,
+  "createdAt": "2026-01-01T00:00:00.000Z",
+  "members": [
+    { "id": 1, "username": "alice" },
+    { "id": 2, "username": "bob" }
+  ]
+}
+```
+
+**400 Bad Request** — Invalid `userId` or chat with yourself.
+
+**404 Not Found** — Target user does not exist.
+
+**409 Conflict** — Chat already exists between these two users.
+
+**401 Unauthorized** — Missing or invalid token.
+
+---
+
+### List User's Chats
+
+`GET /chats`
+
+Returns all chats where the authenticated user is a member. Requires authentication.
+
+#### Responses
+
+**200 OK**
+
 ```json
 [
   {
-    "id": "conv-sil-twan",
-    "name": "Twan",
-    "participants": [
-      { "id": "sil", "username": "sil", "name": "Sil" },
-      { "id": "twan", "username": "twan", "name": "Twan" }
-    ],
-    "lastMessage": {
-      "id": "msg-123",
-      "chatId": "conv-sil-twan",
-      "senderId": "twan",
-      "text": "WebSocket is gereed!",
-      "createdAt": "2026-09-14T18:00:00.000Z",
-      "status": "delivered"
-    },
-    "unreadCount": 0,
-    "updatedAt": "2026-09-14T18:00:00.000Z"
+    "id": 5,
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "members": [
+      { "id": 1, "username": "alice" },
+      { "id": 2, "username": "bob" }
+    ]
+  },
+  {
+    "id": 3,
+    "createdAt": "2026-01-02T00:00:00.000Z",
+    "members": [
+      { "id": 1, "username": "alice" },
+      { "id": 3, "username": "carol" }
+    ]
   }
 ]
 ```
 
----
+Empty array if user has no chats.
 
-### `POST /api/chats`
-Direct gesprek starten of ophalen met een specifieke partner. Als het gesprek tussen deze twee gebruikers al bestaat, wordt het bestaande gesprek geretourneerd.
-
-#### Request Headers
-`Authorization: Bearer <token>`
-
-#### Request Body
-```json
-{
-  "partnerId": "twan"
-}
-```
-
-#### Response (`200 OK` of `201 Created`)
-```json
-{
-  "id": "conv-sil-twan",
-  "name": "Twan",
-  "participants": [
-    { "id": "sil", "username": "sil", "name": "Sil" },
-    { "id": "twan", "username": "twan", "name": "Twan" }
-  ],
-  "unreadCount": 0,
-  "updatedAt": "2026-09-14T18:00:00.000Z"
-}
-```
+**401 Unauthorized** — Missing or invalid token.
 
 ---
 
-### `GET /api/chats/:id`
-Details van één specifiek gesprek ophalen.
+## WebSocket API
 
-#### Request Headers
-`Authorization: Bearer <token>`
+Endpoint: `ws://<host>:<port>/ws`
 
-#### Response (`200 OK`)
+All WebSocket communication uses JSON messages with this structure:
+
 ```json
 {
-  "id": "conv-sil-twan",
-  "name": "Twan",
-  "participants": [
-    { "id": "sil", "username": "sil", "name": "Sil" },
-    { "id": "twan", "username": "twan", "name": "Twan" }
-  ],
-  "unreadCount": 0,
-  "updatedAt": "2026-09-14T18:00:00.000Z"
+  "type": "<event-type>",
+  "payload": { ... }
 }
 ```
 
+### Connection Flow
+
+1. Connect to `/ws`
+2. Send `auth` message with JWT token
+3. Receive `auth.ok` on success, or `error` on failure
+4. After authentication, send/receive other events
+
 ---
 
-## 4. Berichten (Messages)
+### Client → Server Events
 
-### `GET /api/chats/:chatId/messages`
-Historische berichten ophalen binnen een gesprek.
+#### Authenticate
 
-#### Query Parameters
-- `limit` (optioneel, bijv. `50`): Aantal berichten om op te halen.
-- `before` (optioneel, ISO timestamp): Paginering om oudere berichten te laden.
-
-#### Response (`200 OK`)
 ```json
-[
-  {
-    "id": "msg-1",
-    "chatId": "conv-sil-twan",
-    "senderId": "sil",
-    "text": "Hoi Twan!",
-    "createdAt": "2026-09-14T17:30:00.000Z",
-    "status": "read"
-  },
-  {
-    "id": "msg-2",
-    "chatId": "conv-sil-twan",
-    "senderId": "twan",
-    "text": "Hoi Sil! Alles draait op de Pi.",
-    "createdAt": "2026-09-14T17:31:00.000Z",
-    "status": "read"
+{
+  "type": "auth",
+  "payload": {
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
   }
-]
+}
+```
+
+**Response on success:**
+
+```json
+{
+  "type": "auth.ok",
+  "payload": {
+    "userId": 1,
+    "username": "twan"
+  }
+}
+```
+
+**Response on failure:**
+
+```json
+{
+  "type": "error",
+  "payload": {
+    "code": "UNAUTHORIZED",
+    "message": "Invalid token"
+  }
+}
 ```
 
 ---
 
-### `POST /api/chats/:chatId/messages`
-Bericht verzenden via REST (fallback wanneer WebSocket offline is).
+#### Send Message
 
-#### Request Body
 ```json
 {
-  "text": "Dit is een fallback bericht",
-  "tempId": "temp-uuid-456"
+  "type": "message.send",
+  "payload": {
+    "chatId": 5,
+    "content": "Hallo!"
+  }
 }
 ```
 
-#### Response (`201 Created` of `200 OK`)
+Validation rules:
+- `chatId`: required, positive integer, must be a chat the user is member of
+- `content`: required, non-empty string
+
+**Response on success:** `message.created` is broadcast to all chat members (including sender).
+
+**Response on failure:**
+
 ```json
 {
-  "id": "msg-3",
-  "chatId": "conv-sil-twan",
-  "senderId": "sil",
-  "text": "Dit is een fallback bericht",
-  "createdAt": "2026-09-14T18:05:00.000Z",
-  "status": "sent",
-  "tempId": "temp-uuid-456"
+  "type": "error",
+  "payload": {
+    "code": "UNAUTHORIZED | INVALID_PAYLOAD | FORBIDDEN | INTERNAL_ERROR",
+    "message": "..."
+  }
+}
+```
+
+Error codes:
+- `UNAUTHORIZED` — Not authenticated
+- `INVALID_PAYLOAD` — Missing/invalid `chatId` or `content`
+- `FORBIDDEN` — User is not a member of the chat
+- `INTERNAL_ERROR` — Server error (message not persisted)
+
+---
+
+### Server → Client Events
+
+#### Message Created
+
+Broadcast to all members of a chat when a message is successfully persisted.
+
+```json
+{
+  "type": "message.created",
+  "payload": {
+    "id": 42,
+    "chatId": 5,
+    "senderId": 1,
+    "content": "Hallo!",
+    "createdAt": "2026-01-01T12:00:00.000Z"
+  }
+}
+```
+
+Fields:
+- `id`: message ID (BIGINT)
+- `chatId`: chat ID
+- `senderId`: user ID of sender
+- `content`: message text
+- `createdAt`: ISO 8601 timestamp
+
+---
+
+#### Error
+
+Sent when a client event fails validation or authorization.
+
+```json
+{
+  "type": "error",
+  "payload": {
+    "code": "UNAUTHORIZED",
+    "message": "Not authenticated"
+  }
 }
 ```
 
 ---
 
-## 5. Realtime WebSocket Protocol (`/ws`)
+### Presence Events
 
-Realtime interacties lopen via JSON frames over `/ws`:
+Presence events are automatically broadcast when users come online or go offline. They are sent to all members of chats that the user participates in.
 
-### Client -> Server
+#### User Online
+
+Broadcast when a user authenticates their first WebSocket connection.
+
 ```json
-// Authenticatie bij handshake
-{ "type": "AUTH", "payload": { "token": "jwt_token" } }
-
-// Bericht verzenden
-{ "type": "SEND_MESSAGE", "payload": { "tempId": "uuid-1", "chatId": "conv-sil-twan", "text": "Hallo!" } }
-
-// Typ-indicator
-{ "type": "TYPING", "payload": { "chatId": "conv-sil-twan", "isTyping": true } }
-
-// Gelezen bevestiging
-{ "type": "READ_ACK", "payload": { "chatId": "conv-sil-twan", "messageId": "msg-123" } }
+{
+  "type": "user.online",
+  "payload": {
+    "userId": 1
+  }
+}
 ```
 
-### Server -> Client
+#### User Offline
+
+Broadcast when a user's last WebSocket connection closes.
+
 ```json
-// Authenticatie bevestigd
-{ "type": "AUTH_SUCCESS", "payload": { "userId": "sil" } }
+{
+  "type": "user.offline",
+  "payload": {
+    "userId": 1
+  }
+}
+```
 
-// Inkomend realtime bericht
-{ "type": "NEW_MESSAGE", "payload": { "id": "msg-124", "chatId": "conv-sil-twan", "senderId": "twan", "text": "Hoi!", "createdAt": "..." } }
+#### Presence Behavior
 
-// Status partner bijgewerkt
-{ "type": "USER_STATUS", "payload": { "userId": "twan", "online": true, "lastSeen": "..." } }
+- A user is considered **online** when they have at least one authenticated WebSocket connection.
+- A user is considered **offline** when they have zero authenticated WebSocket connections.
+- Presence events are only sent to users who share at least one chat with the user whose status changed.
+- Users who are not authenticated via WebSocket do not receive presence events.
+- Presence state is not persisted in the database (ephemeral, in-memory only).
 
-// Typ-indicator van partner
-{ "type": "TYPING_STATUS", "payload": { "chatId": "conv-sil-twan", "userId": "twan", "isTyping": true } }
+---
 
-// Bevestiging verzonden bericht
-{ "type": "MESSAGE_ACK", "payload": { "tempId": "uuid-1", "id": "msg-124", "createdAt": "..." } }
+## Health
 
-// Foutmelding vanuit server (bijv. ongeldig bericht, database fout, of verbinding geweigerd)
-{ "type": "ERROR", "payload": { "message": "Ongeldige payload of serverfout", "details?: "..." } }
+`GET /health`
+
+Returns `200 OK` when the backend is reachable.
+
+```json
+{ "status": "ok" }
 ```
 
 ---
 
-## 6. Foutafhandeling (Error Format)
+## Appendix
 
-Alle HTTP errors vanuit de backend volgen altijd dit JSON-formaat:
+HTTP errors always follow this shape:
 
 ```json
-{
-  "error": "Human-readable foutmelding"
-}
+{ "error": "Human-readable message" }
 ```
-
-### Gangbare HTTP Status Codes
-- `400 Bad Request` — Ongeldige request body of ontbrekende parameters.
-- `401 Unauthorized` — Ongeldig of ontbrekend authenticatietoken.
-- `403 Forbidden` — Geen toegang tot dit gesprek.
-- `404 Not Found` — Endpoint, gebruiker of gesprek niet gevonden.
-- `500 Internal Server Error` — Onverwachte fout in de backend.
